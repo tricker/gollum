@@ -37,6 +37,11 @@ module Precious
       enable :logging, :raise_errors, :dump_errors
     end
 
+    # Use basic auth on all pages
+    use Rack::Auth::Basic, "Restricted Area" do |username, password|
+      [username, password] == ['admin', 'admin']
+    end
+
     get '/' do
       show_page_or_file('Home')
     end
