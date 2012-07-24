@@ -8,8 +8,8 @@ context "Wiki" do
 
   test "normalizes commit hash" do
     commit = {:message => 'abc'}
-    name  = @wiki.repo.config['user.name']
-    email = @wiki.repo.config['user.email']
+    name  = @wiki.repo.config['user.name']  || @wiki.default_committer_name
+    email = @wiki.repo.config['user.email'] ||  @wiki.default_committer_email
     committer = Gollum::Committer.new(@wiki, commit)
     assert_equal name,  committer.actor.name
     assert_equal email, committer.actor.email
@@ -37,7 +37,7 @@ context "Wiki" do
         assert_equal committer, index
       end
 
-      res = wiki.write_page("Gollum", :markdown, "# Gollum", 
+      res = wiki.write_page("Gollum", :markdown, "# Gollum",
         :committer => committer)
 
       assert_equal committer, res
@@ -50,7 +50,7 @@ context "Wiki" do
   end
 
   test "parents with default master ref" do
-    ref = 'a8ad3c09dd842a3517085bfadd37718856dee813'
+    ref = '629aa678272b017a4d136d35e77ac94d80b08dc2'
     committer = Gollum::Committer.new(@wiki)
     assert_equal ref,  committer.parents.first.sha
   end

@@ -2,6 +2,7 @@ module Precious
   module Views
     class Edit < Layout
       include Editable
+      include HasPage
 
       attr_reader :page, :content
 
@@ -11,6 +12,17 @@ module Precious
 
       def page_name
         @name.gsub('-', ' ')
+      end
+
+      def header
+        if @header.nil?
+          if page = @page.header
+            @header = page.raw_data
+          else
+            @header = false
+          end
+        end
+        @header
       end
 
       def footer

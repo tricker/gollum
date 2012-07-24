@@ -16,7 +16,7 @@ context "Page" do
     page = @wiki.page('Bilbo Baggins')
     assert_equal Gollum::Page, page.class
     assert page.raw_data =~ /^# Bilbo Baggins\n\nBilbo Baggins/
-    assert page.formatted_data =~ /<h1>Bilbo Baggins<\/h1>\n\n<p>Bilbo Baggins/
+    assert page.formatted_data =~ %r{<h1>Bilbo Baggins<a class="anchor" id="Bilbo-Baggins" href="#Bilbo-Baggins"></a>\n</h1>\n\n<p>Bilbo Baggins}
     assert_equal 'Bilbo-Baggins.md', page.path
     assert_equal :markdown, page.format
     assert_equal @wiki.repo.commits.first.id, page.version.id
@@ -26,9 +26,39 @@ context "Page" do
     assert_equal @wiki.page('Bilbo Baggins').path, @wiki.page('bilbo baggins').path
   end
 
+  test "get existing page with hyphen" do
+    assert_equal @wiki.page('Bilbo Baggins').path, @wiki.page('Bilbo-Baggins').path
+  end
+
+  test "get existing page with underscore" do
+    assert_nil @wiki.page('Bilbo_Baggins')
+  end
+
+  test "get existing page where filename contains whitespace, with hypen" do
+    assert_equal @wiki.page('Samwise Gamgee').path, @wiki.page('Samwise-Gamgee').path
+  end
+
+  test "get existing page where filename contains whitespace, with underscore" do
+    assert_equal @wiki.page('Samwise Gamgee').path, @wiki.page('Samwise_Gamgee').path
+  end
+
+  test "get existing page where filename contains whitespace, with whitespace" do
+    assert_equal @wiki.page('Samwise Gamgee').path, @wiki.page('Samwise Gamgee').path
+  end
+
   test "get nested page" do
     page = @wiki.page('Eye Of Sauron')
     assert_equal 'Mordor/Eye-Of-Sauron.md', page.path
+  end
+
+  test "url_path" do
+    page = @wiki.page('Bilbo Baggins')
+    assert_equal 'Bilbo-Baggins', page.url_path
+  end
+
+  test "nested url_path" do
+    page = @wiki.page('Eye Of Sauron')
+    assert_equal 'Mordor/Eye-Of-Sauron', page.url_path
   end
 
   test "page versions" do
@@ -84,14 +114,33 @@ context "Page" do
     assert_equal 'My Precious', page.title
   end
 
-  test "title from h1 with normal contents" do
+  test "title from filename with normal contents" do
     page = @wiki.page('Home')
-    assert_equal "The LOTR Wiki", page.title
+    assert_equal "Home", page.title
   end
 
-  test "title from h1 with html contents" do
+  test "title from filename with html contents" do
     page = @wiki.page('Eye Of Sauron')
     assert_equal "Eye Of Sauron", page.title
+  end
+
+  test "top level header" do
+    header = @wiki.page('Home').header
+    assert_equal "Hobbits\n", header.raw_data
+    assert_equal "_Header.md", header.path
+  end
+
+  test "nested header" do
+    header = @wiki.page('Eye Of Sauron').header
+    assert_equal "Sauron\n", header.raw_data
+    assert_equal "Mordor/_Header.md", header.path
+  end
+
+  test "header itself" do
+    header = @wiki.page("_Header")
+    assert_nil header.header
+    assert_nil header.footer
+    assert_nil header.sidebar
   end
 
   test "top level footer" do
@@ -108,6 +157,7 @@ context "Page" do
 
   test "footer itself" do
     footer = @wiki.page("_Footer")
+    assert_nil footer.header
     assert_nil footer.footer
     assert_nil footer.sidebar
   end
@@ -126,6 +176,7 @@ context "Page" do
 
   test "sidebar itself" do
     sidebar = @wiki.page("_Sidebar")
+    assert_nil sidebar.header
     assert_nil sidebar.footer
     assert_nil sidebar.sidebar
   end
@@ -144,3 +195,36 @@ context "Page" do
     assert_equal "/foo", Gollum::BlobEntry.normalize_dir("/foo")
   end
 end
+
+context "within a sub-directory" do
+  setup do
+    @wiki = Gollum::Wiki.new(testpath("examples/lotr.git"), { :page_file_dir => 'Rivendell' })
+  end
+
+  test "get existing page" do
+    page = @wiki.page('Elrond')
+    assert_equal Gollum::Page, page.class
+    assert page.raw_data =~ /^# Elrond\n\nElrond/
+    assert_equal 'Rivendell/Elrond.md', page.path
+    assert_equal :markdown, page.format
+    assert_equal @wiki.repo.commits.first.id, page.version.id
+  end
+
+  test "should not get page from parent dir" do
+    page = @wiki.page('Bilbo Baggins')
+    assert_equal nil, page
+  end
+
+  test "should inherit header/footer/sidebar pages from parent directories" do
+    page = @wiki.page('Elrond')
+
+    assert_equal Gollum::Page, page.sidebar.class
+    assert_equal Gollum::Page, page.header.class
+    assert_equal Gollum::Page, page.footer.class
+
+    assert page.sidebar.raw_data =~ /^Lord of the Rings/
+    assert page.header.raw_data =~ /^Hobbits/
+    assert page.footer.raw_data =~ /^Lord of the Rings/
+  end
+end
+

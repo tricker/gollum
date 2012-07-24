@@ -49,8 +49,24 @@ opts = OptionParser.new do |opts|
     wiki_options[:page_file_dir] = path
   end
 
+  opts.on("--base-path [PATH]", "Specify the base path.") do |path|
+    wiki_options[:base_path] = path
+  end
+
+  opts.on("--gollum-path [PATH]", "Specify the gollum path.") do |path|
+    wiki_options[:gollum_path] = path
+  end
+
   opts.on("--ref [REF]", "Specify the repository ref to use (default: master).") do |ref|
     wiki_options[:ref] = ref
+  end
+
+  opts.on("--no-live-preview", "Disables livepreview.") do
+    wiki_options[:live_preview] = false
+  end
+
+  opts.on("--no-mathjax", "Disables mathjax.") do
+    options['mathjax'] = false
   end
 end
 
@@ -63,7 +79,10 @@ rescue OptionParser::InvalidOption
   exit
 end
 
-gollum_path = ARGV[0] || Dir.pwd
+# --gollum-path wins over ARGV[0]
+gollum_path = wiki_options[:gollum_path] ?
+              wiki_options[:gollum_path] :
+              ARGV[0] || Dir.pwd
 
 if options['irb']
   require 'irb'
