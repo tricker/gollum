@@ -61,7 +61,7 @@ context "Wiki" do
   test "list files" do
     files = @wiki.files
     assert_equal \
-      ['Data.csv', 'eye.jpg', 'todo.txt'],
+      ['Data.csv', 'Riddles.rd', 'eye.jpg', 'todo.txt'],
       files.map { |p| p.filename }.sort
   end
 
@@ -94,6 +94,23 @@ context "Wiki" do
     assert_match    "b/_Sidebar.md", diff
     assert_no_match regex, diff
   end
+
+  test "gets scoped page from specified directory" do
+    @path = cloned_testpath('examples/lotr.git')
+    begin
+      wiki = Gollum::Wiki.new(@path)
+      index = wiki.repo.index
+      index.read_tree 'master'
+      index.add('Foobar/Elrond.md', 'Baz')
+      index.commit 'Add Foobar/Elrond.', [wiki.repo.commits.last], Grit::Actor.new('Tom Preston-Werner', 'tom@github.com')
+
+      assert_equal 'Rivendell/Elrond.md', wiki.page('Elrond', nil, 'Rivendell').path
+      # test paged as well.
+      assert_equal 'Foobar/Elrond.md', wiki.paged('Elrond', 'Foobar').path
+    ensure
+      FileUtils.rm_rf(@path)
+    end
+  end
 end
 
 context "Wiki page previewing" do
@@ -106,7 +123,7 @@ context "Wiki page previewing" do
   test "preview_page" do
     page = @wiki.preview_page("Test", "# Bilbo", :markdown)
     assert_equal "# Bilbo", page.raw_data
-    assert_equal %Q{<h1>Bilbo<a class="anchor" id="Bilbo" href="#Bilbo"></a>\n</h1>}, page.formatted_data
+    assert_equal %Q{<h1>Bilbo<a class=\"anchor\" id=\"Bilbo\" href=\"#Bilbo\"></a></h1>}, page.formatted_data
     assert_equal "Test.md", page.filename
     assert_equal "Test", page.name
   end
@@ -124,6 +141,16 @@ context "Wiki TOC" do
     assert_equal "# Bilbo", page.raw_data
     assert_equal '<h1>Bilbo<a class="anchor" id="Bilbo" href="#Bilbo"></a></h1>', page.formatted_data.gsub(/\n/,"")
     assert_equal %{<div class="toc"><div class="toc-title">Table of Contents</div><ul><li><a href="#Bilbo">Bilbo</a></li></ul></div>}, page.toc_data.gsub(/\n */,"")
+  end
+
+  # Ensure ' creates valid links in TOC
+  # Incorrect: <a href=\"#a\" b=\"\">
+  #   Correct: <a href=\"#a'b\">
+  test "' in link" do
+    page = @wiki.preview_page("Test", "# a'b", :markdown)
+    assert_equal "# a'b", page.raw_data
+    assert_equal %q{<h1>a'b<a class="anchor" id="a'b" href="#a'b"></a></h1>}, page.formatted_data.gsub(/\n/,"")
+    assert_equal %{<div class=\"toc\"><div class=\"toc-title\">Table of Contents</div><ul><li><a href=\"#a'b\">a'b</a></li></ul></div>}, page.toc_data.gsub(/\n */,"")
   end
 end
 
@@ -170,6 +197,16 @@ context "Wiki page writing" do
     assert_equal cd[:name], @wiki.repo.commits.first.author.name
     assert_equal cd[:email], @wiki.repo.commits.first.author.email
   end
+
+if $METADATA
+  test "page title override with metadata" do
+    @wiki.write_page("Gollum", :markdown, "<!-- --- title: Over -->", commit_details)
+
+    page = @wiki.page("Gollum")
+
+    assert_equal 'Over', page.url_path_title
+  end
+end
 
   test "update page with format change" do
     @wiki.write_page("Gollum", :markdown, "# Gollum", commit_details)
@@ -270,7 +307,7 @@ context "Wiki page writing with whitespace (filename contains whitespace)" do
 
     assert_equal :textile, @wiki.page("Samwise Gamgee").format
     assert_equal "h1. Samwise Gamgee2", @wiki.page("Samwise Gamgee").raw_data
-    assert_equal "Samwise Gamgee.textile", @wiki.page("Samwise Gamgee").filename
+    assert_equal "Samwise-Gamgee.textile", @wiki.page("Samwise Gamgee").filename
   end
 
   test "update page with format change, verify non-canonicalization of filename,  where filename contains Whitespace" do
@@ -282,7 +319,7 @@ context "Wiki page writing with whitespace (filename contains whitespace)" do
 
     assert_equal :textile, @wiki.page("Samwise Gamgee").format
     assert_equal "h1. Samwise Gamgee", @wiki.page("Samwise Gamgee").raw_data
-    assert_equal "Samwise Gamgee.textile", @wiki.page("Samwise Gamgee").filename
+    assert_equal "Samwise-Gamgee.textile", @wiki.page("Samwise Gamgee").filename
   end
 
   test "update page with name change, verify canonicalization of filename, where filename contains Whitespace" do
@@ -323,6 +360,11 @@ context "Wiki sync with working directory" do
   test "write a page" do
     @wiki.write_page("New Page", :markdown, "Hi", commit_details)
     assert_equal "Hi", File.read(File.join(@path, "New-Page.md"))
+  end
+
+  test "write a page in subdirectory" do
+    @wiki.write_page("New Page", :markdown, "Hi", commit_details, "Subdirectory")
+    assert_equal "Hi", File.read(File.join(@path, "Subdirectory", "New-Page.md"))
   end
 
   test "update a page with same name and format" do
@@ -389,8 +431,8 @@ context "Wiki sync with working directory (filename contains whitespace)" do
   test "update a page with same name and different format" do
     page = @wiki.page("Samwise Gamgee")
     @wiki.update_page(page, page.name, :textile, "What we need is a few good taters.", commit_details)
-    assert_equal "What we need is a few good taters.", File.read(File.join(@path, "Samwise Gamgee.textile"))
-    assert !File.exist?(File.join(@path, "Samwise Gamgee.mediawiki"))
+    assert_equal "What we need is a few good taters.", File.read(File.join(@path, "Samwise-Gamgee.textile"))
+    assert !File.exist?(File.join(@path, "Samwise-Gamgee.mediawiki"))
   end
 
   test "update a page with different name and different format" do
@@ -490,3 +532,136 @@ context "Wiki page writing with different branch" do
     assert_equal nil, @wiki.page("Bilbo")
   end
 end
+
+context "Renames directory traversal" do
+  setup do
+    @path = cloned_testpath("examples/revert.git")
+    @wiki = Gollum::Wiki.new(@path)
+    Precious::App.set(:gollum_path, @path)
+    Precious::App.set(:wiki_options, {})
+  end
+
+  teardown do
+    FileUtils.rm_rf(@path)
+  end
+
+  test "rename aborts on nil" do
+    cd = {:message => "def"}
+    res = @wiki.rename_page(@wiki.page("some-super-fake-page"), "B", cd)
+    assert !res, "rename did not abort with non-existant page"
+    res = @wiki.rename_page(@wiki.page("B"), "", cd)
+    assert !res, "rename did not abort with empty rename"
+    res = @wiki.rename_page(@wiki.page("B"), nil, cd)
+    assert !res, "rename did not abort with nil rename"
+  end
+
+  test "rename page no-act" do
+    # Make sure renames don't do anything if the name is the same.
+    cd = {:message => "def"}
+
+    # B.md => B.md
+    res = @wiki.rename_page(@wiki.page("B"), "B", cd)
+    assert !res, "NOOP rename did not abort"
+  end
+
+  test "rename page without directories" do
+    # Make sure renames work with relative paths.
+    cd = {:message => "def"}
+    source = @wiki.page("B")
+
+    # B.md => C.md
+    res = @wiki.rename_page(source, "C", cd)
+    assert res
+
+    renamed_ok(source, @wiki.page("C"))
+  end
+
+  test "rename page with subdirs" do
+    # Make sure renames in subdirectories happen ok
+    cd = {:message => "def"}
+    source = @wiki.paged("H", "G")
+
+    # G/H.md => G/F.md
+    @wiki.rename_page(source, "G/F", cd)
+
+    renamed_ok(source, @wiki.paged("F", "G"))
+  end
+
+  test "rename page absolute path is still no-act" do
+    # Make sure renames don't do anything if the name is the same.
+    cd = {:message => "def"}
+
+    # B.md => B.md
+    res = @wiki.rename_page(@wiki.page("B"), "/B", cd)
+    assert !res, "NOOP rename did not abort"
+  end
+
+  test "rename page absolute path NOOPs ok" do
+    # Make sure renames don't do anything if the name is the same and we are in a subdirectory.
+    cd = {:message => "def"}
+    source = @wiki.paged("H", "G")
+
+    # G/H.md => G/H.md
+    res = @wiki.rename_page(source, "/G/H", cd)
+    assert !res, "NOOP rename did not abort"
+  end
+
+  test "rename page absolute directory" do
+    # Make sure renames work with absolute paths.
+    cd = {:message => "def"}
+    source = @wiki.page("B")
+
+    # B.md => C.md
+    res = @wiki.rename_page(source, "/C", cd)
+    assert res
+
+    renamed_ok(source, @wiki.page("C"))
+  end
+
+  test "rename page absolute directory with subdirs" do
+    # Make sure renames in subdirectories happen ok
+    cd = {:message => "def"}
+    source = @wiki.paged("H", "G")
+
+    # G/H.md => G/F.md
+    @wiki.rename_page(source, "/G/F", cd)
+
+    renamed_ok(source, @wiki.paged("F", "G"))
+  end
+
+  test "rename page relative directory with new dir creation" do
+    # Make sure renames in subdirectories create more subdirectories ok
+    cd = {:message => "def"}
+    source = @wiki.paged("H", "G")
+
+    # G/H.md => G/K/F.md
+    assert_not_equal k = @wiki.rename_page(source, "K/F", cd), false
+
+    new_page = @wiki.paged("F", "K")
+    assert_not_equal new_page, nil
+    renamed_ok(source, new_page)
+  end
+
+  test "rename page absolute directory with subdir creation" do
+    # Make sure renames in subdirectories create more subdirectories ok
+    cd = {:message => "def"}
+    source = @wiki.paged("H", "G")
+
+    # G/H.md => G/K/F.md
+    assert_not_equal @wiki.rename_page(source, "/G/K/F", cd), false
+
+    new_page = @wiki.paged("F", "G/K")
+    assert_not_equal new_page, nil
+    renamed_ok(source, new_page)
+  end
+
+  def renamed_ok(page_source, page_target)
+    @wiki.clear_cache
+    page1 = @wiki.paged(page_source.name, page_source.path)
+    assert_nil page1
+    assert_equal "INITIAL\n\nSPAM2\n", page_target.raw_data
+    assert_equal 'def', page_target.version.message
+    assert_not_equal page_source.version.sha, page_target.version.sha
+  end
+end
+

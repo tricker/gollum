@@ -2,7 +2,7 @@ require 'rubygems'
 require 'rack/test'
 require 'test/unit'
 require 'shoulda'
-require 'mocha'
+require 'mocha/setup'
 require 'fileutils'
 
 dir = File.dirname(File.expand_path(__FILE__))
@@ -12,6 +12,9 @@ $LOAD_PATH.unshift(dir)
 ENV['RACK_ENV'] = 'test'
 require 'gollum'
 require 'gollum/frontend/app'
+
+# Disable the metadata feature
+$METADATA = false
 
 # Make sure we're in the test dir, the tests expect that to be the current
 # directory.

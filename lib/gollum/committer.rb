@@ -1,3 +1,4 @@
+# ~*~ encoding: utf-8 ~*~
 module Gollum
   # Responsible for handling the commit process for a Wiki.  It sets up the
   # Git index, provides methods for modifying the tree, and stores callbacks
@@ -84,6 +85,10 @@ module Gollum
     #
     # Returns nothing (modifies the Index in place).
     def add_to_index(dir, name, format, data, allow_same_ext = false)
+      # spaces must be dashes
+      dir.gsub!(' ', '-')
+      name.gsub!(' ', '-')
+
       path = @wiki.page_file_name(name, format)
 
       dir = '/' if dir.strip.empty?
@@ -91,14 +96,22 @@ module Gollum
       fullpath = ::File.join(*[@wiki.page_file_dir, dir, path].compact)
       fullpath = fullpath[1..-1] if fullpath =~ /^\//
 
-      if index.current_tree && tree = index.current_tree / (@wiki.page_file_dir || '/') / dir
+      if index.current_tree && tree = index.current_tree / (@wiki.page_file_dir || '/')
+        tree = tree / dir unless tree.nil?
+      end
+
+      if tree
         downpath = path.downcase.sub(/\.\w+$/, '')
 
         tree.blobs.each do |blob|
           next if page_path_scheduled_for_deletion?(index.tree, fullpath)
-          file = blob.name.downcase.sub(/\.\w+$/, '')
-          file_ext = ::File.extname(blob.name).sub(/^\./, '')
-          if downpath == file && !(allow_same_ext && file_ext == ext)
+          
+          existing_file = blob.name.downcase.sub(/\.\w+$/, '')
+          existing_file_ext = ::File.extname(blob.name).sub(/^\./, '')
+
+          new_file_ext = ::File.extname(path).sub(/^\./, '')
+
+          if downpath == existing_file && !(allow_same_ext && new_file_ext == existing_file_ext)
             raise DuplicatePageError.new(dir, blob.name, path)
           end
         end

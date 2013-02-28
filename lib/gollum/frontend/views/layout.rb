@@ -19,6 +19,15 @@ module Precious
       def has_path
         !@path.nil?
       end
+
+      def base_url
+        @base_url
+      end
+
+      def css # custom css
+        @css
+      end
+
     end
   end
 end

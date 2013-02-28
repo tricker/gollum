@@ -12,6 +12,10 @@ class FakePage
     ::File.basename(@filepath, ::File.extname(@filepath))
   end
 
+  def filename
+    ::File.basename(@filepath)
+  end
+
   def path
     return @filepath
   end
@@ -57,10 +61,32 @@ def read file
 end
 
 # For creating expected files.
+# write name, actual
 def write file, content
   File.open(@@test_path + file + '.txt', 'w') do | f |
     f.write content
   end
+end
+
+def to_html html
+  # Remove blank nodes for proper formatting
+  doc = Nokogiri.XML(html) do |cfg|
+    cfg.default_xml.noblanks
+  end
+
+  # Save as XHTML
+  doc.to_xml( { :save_with => Nokogiri::XML::Node::SaveOptions::DEFAULT_XHTML, :indent => 2, :encoding => 'UTF-8' } )
+end
+
+def check name, pages_array
+  pages = FakePages.new pages_array
+  expected = read name
+  actual = to_html view pages
+
+  # Uncomment when updating tests
+  # write name, actual
+
+  assert_equal expected, actual
 end
 
 # Test Notes
@@ -69,44 +95,26 @@ end
 # docs/sanitization.md => file within folder
 context 'file_view' do
   test 'one file' do
-    pages = FakePages.new [ '0.md' ]
-    expected = read '1_file'
-    actual = view pages
-    assert_equal expected, actual
+    check '1_file', [ '0.md' ]
   end
 
   test 'one folder' do
-    pages = FakePages.new [ 'folder0/' ]
-    expected = read '1_folder'
-    actual = view pages
-    assert_equal expected, actual
+    check '1_folder', [ 'folder0/' ]
   end
 
   test 'one file with one folder' do
-    pages = FakePages.new [ 'folder0/0.md' ]
-    expected = read '1_file_1_folder'
-    actual = view pages
-    assert_equal expected, actual
+    check '1_file_1_folder', [ 'folder0/0.md' ]
   end
 
   test 'two files with two folders' do
-    pages = FakePages.new [ 'folder0/0.md', 'folder1/1.md' ]
-    expected = read '2_files_2_folders'
-    actual = view pages
-    assert_equal expected, actual
+    check '2_files_2_folders', [ 'folder0/0.md', 'folder1/1.md' ]
   end
 
   test 'two files with two folders and one root file' do
-    pages = FakePages.new [ 'root.md', 'folder0/0.md', 'folder1/1.md' ]
-    expected = read '2_files_2_folders_1_root'
-    actual = view pages
-    assert_equal expected, actual
+    check '2_files_2_folders_1_root', [ 'root.md', 'folder0/0.md', 'folder1/1.md' ]
   end
 
   test 'nested folders' do
-    pages = FakePages.new [ 'folder0/folder1/folder2/0.md', 'folder0/folder1/folder3/1.md', 'folder4/2.md' ]
-    expected = read 'nested_folders'
-    actual = view pages
-    assert_equal expected, actual
+    check 'nested_folders', [ 'folder0/folder1/folder2/0.md', 'folder0/folder1/folder3/1.md', 'folder4/2.md' ]
   end
 end # context

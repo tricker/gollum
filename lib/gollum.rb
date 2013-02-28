@@ -1,5 +1,7 @@
+# ~*~ encoding: utf-8 ~*~
 # stdlib
 require 'digest/md5'
+require 'digest/sha1'
 require 'ostruct'
 
 # external
@@ -17,12 +19,17 @@ require File.expand_path('../gollum/page', __FILE__)
 require File.expand_path('../gollum/file', __FILE__)
 require File.expand_path('../gollum/file_view', __FILE__)
 require File.expand_path('../gollum/markup', __FILE__)
+require File.expand_path('../gollum/markups', __FILE__)
 require File.expand_path('../gollum/sanitization', __FILE__)
-require File.expand_path('../gollum/tex', __FILE__)
 require File.expand_path('../gollum/web_sequence_diagram', __FILE__)
+require File.expand_path('../gollum/frontend/uri_encode_component', __FILE__)
+
+# Set ruby to UTF-8 mode
+# This is required for Ruby 1.8.7 which gollum still supports.
+$KCODE = 'U' if RUBY_VERSION[0,3] == '1.8'
 
 module Gollum
-  VERSION = '2.1.0'
+  VERSION = '2.4.11'
 
   def self.assets_path
     ::File.expand_path('gollum/frontend/public', ::File.dirname(__FILE__))

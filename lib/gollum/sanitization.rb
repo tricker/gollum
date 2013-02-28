@@ -1,3 +1,4 @@
+# ~*~ encoding: utf-8 ~*~
 module Gollum
   # Encapsulate sanitization options.
   #
@@ -44,7 +45,8 @@ module Gollum
     # Default whitelisted protocols for URLs.
     PROTOCOLS = {
       'a'   => {'href' => ['http', 'https', 'mailto', 'ftp', 'irc', 'apt', :relative]},
-      'img' => {'src'  => ['http', 'https', :relative]}
+      'img' => {'src'  => ['http', 'https', :relative]},
+      'form' => {'action' => ['http', 'https', :relative]}
     }.freeze
 
     ADD_ATTRIBUTES = lambda do |env, node|
@@ -104,7 +106,7 @@ module Gollum
     attr_reader :transformers
 
     # Gets or sets a String prefix which is added to ID attributes.
-    # Default: 'wiki-'
+    # Default: ''
     attr_accessor :id_prefix
 
     # Gets a Hash describing HTML attributes that Sanitize should add.
@@ -127,7 +129,7 @@ module Gollum
       @add_attributes   = {}
       @remove_contents  = REMOVE_CONTENTS.dup
       @allow_comments   = false
-      @id_prefix        = 'wiki-'
+      @id_prefix        = ''
       yield self if block_given?
     end
 

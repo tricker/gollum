@@ -1,3 +1,4 @@
+# ~*~ encoding: utf-8 ~*~
 module Gollum
   class Wiki
     include Pagination
@@ -136,6 +137,20 @@ module Gollum
     # Gets the boolean live preview value.
     attr_reader :live_preview
 
+    # Injects custom css from custom.css in root repo.
+    # Defaults to false
+    attr_reader :css
+
+    # Sets page title to value of first h1
+    # Defaults to false
+    attr_reader :h1_title
+    
+    # Gets the custom index page for / and subdirs (e.g. foo/)
+    attr_reader :index_page
+    
+    # Gets side on which the sidebar should be shown
+    attr_reader :bar_side
+
     # Public: Initialize a new Gollum Repo.
     #
     # path    - The String path to the Git repository that holds the Gollum
@@ -154,6 +169,19 @@ module Gollum
     #           :ref - String the repository ref to retrieve pages from
     #           :ws_subs       - Array of chars to sub for ws in filenames.
     #           :mathjax       - Set to false to disable mathjax.
+    #           :user_icons    - Enable user icons on the history page. [gravatar, identicon, none].
+    #                            Default: none
+    #           :show_all      - Show all files in file view, not just valid pages.
+    #                            Default: false
+    #           :collapse_tree - Start with collapsed file view. Default: false
+    #           :css           - Include the custom.css file from the repo.
+    #           :h1_title      - Concatenate all h1's on a page to form the
+    #                            page title.
+    #           :index_page    - The default page to retrieve or create if the 
+    #                            a directory is accessed.
+    #           :bar_side      - Where the sidebar should be displayed, may be:
+    #                             - :left
+    #                             - :right
     #
     # Returns a fresh Gollum::Repo.
     def initialize(path, options = {})
@@ -162,24 +190,37 @@ module Gollum
         options[:access] = path
         path             = path.path
       end
-      @path          = path
-      @repo_is_bare  = options[:repo_is_bare]
-      @page_file_dir = options[:page_file_dir]
-      @access        = options[:access]       || GitAccess.new(path, @page_file_dir, @repo_is_bare)
-      @base_path     = options[:base_path]    || "/"
-      @page_class    = options[:page_class]   || self.class.page_class
-      @file_class    = options[:file_class]   || self.class.file_class
-      @markup_classes = options[:markup_classes] || self.class.markup_classes
-      @repo          = @access.repo
-      @ref           = options[:ref] || self.class.default_ref
-      @sanitization  = options[:sanitization] || self.class.sanitization
-      @ws_subs       = options[:ws_subs] ||
-        self.class.default_ws_subs
-      @history_sanitization = options[:history_sanitization] ||
-        self.class.history_sanitization
-      @live_preview  = options.fetch(:live_preview, true)
-      @universal_toc = options.fetch(:universal_toc, false)
-      @mathjax = options[:mathjax] || true
+
+      # Use .fetch instead of ||
+      #
+      # o = { :a => false }
+      # o[:a] || true # => true
+      # o.fetch :a, true # => false
+
+      @path                 = path
+      @repo_is_bare         = options.fetch :repo_is_bare, nil
+      @page_file_dir        = options.fetch :page_file_dir, nil
+      @access               = options.fetch :access, GitAccess.new(path, @page_file_dir, @repo_is_bare)
+      @base_path            = options.fetch :base_path, "/"
+      @page_class           = options.fetch :page_class, self.class.page_class
+      @file_class           = options.fetch :file_class, self.class.file_class
+      @markup_classes       = options.fetch :markup_classes, self.class.markup_classes
+      @repo                 = @access.repo
+      @ref                  = options.fetch :ref, self.class.default_ref
+      @sanitization         = options.fetch :sanitization, self.class.sanitization
+      @ws_subs              = options.fetch :ws_subs, self.class.default_ws_subs
+      @history_sanitization = options.fetch :history_sanitization, self.class.history_sanitization
+      @live_preview         = options.fetch :live_preview, true
+      @universal_toc        = options.fetch :universal_toc, false
+      @mathjax              = options.fetch :mathjax, false
+      @show_all             = options.fetch :show_all, false
+      @collapse_tree        = options.fetch :collapse_tree, false
+      @css                  = options.fetch :css, false
+      @h1_title             = options.fetch :h1_title, false
+      @index_page           = options.fetch :index_page, 'Home'
+      @bar_side             = options.fetch :sidebar, :right
+      @user_icons           = ['gravatar', 'identicon'].include?( options[:user_icons] ) ?
+                              options[:user_icons] : 'none'
     end
 
     # Public: check whether the wiki's git repo exists on the filesystem.
@@ -189,14 +230,27 @@ module Gollum
       @access.exist?
     end
 
-    # Public: Get the formatted page for a given page name.
+    # Public: Get the formatted page for a given page name, version, and dir.
     #
     # name    - The human or canonical String page name of the wiki page.
     # version - The String version ID to find (default: @ref).
+    # dir     - The directory String relative to the repo.
     #
     # Returns a Gollum::Page or nil if no matching page was found.
-    def page(name, version = @ref)
-      @page_class.new(self).find(name, version)
+    def page(name, version = @ref, dir = nil, exact = false)
+      version = @ref if version.nil?
+      @page_class.new(self).find(name, version, dir, exact)
+    end
+
+    # Public: Convenience method instead of calling page(name, nil, dir).
+    #
+    # name    - The human or canonical String page name of the wiki page.
+    # version - The String version ID to find (default: @ref).
+    # dir     - The directory String relative to the repo.
+    #
+    # Returns a Gollum::Page or nil if no matching page was found.
+    def paged(name, dir = nil, exact = false, version = @ref)
+      page(name, version, dir, exact)
     end
 
     # Public: Get the static file for a given name.
@@ -243,10 +297,15 @@ module Gollum
     #          :committer - Optional Gollum::Committer instance.  If provided,
     #                       assume that this operation is part of batch of
     #                       updates and the commit happens later.
-    #
+    # dir    - The String subdirectory of the Gollum::Page without any
+    #          prefix or suffix slashes (e.g. "foo/bar").
     # Returns the String SHA1 of the newly written version, or the
     # Gollum::Committer instance if this is part of a batch update.
-    def write_page(name, format, data, commit = {})
+    def write_page(name, format, data, commit = {}, dir = '')
+      # spaces must be dashes
+      name.gsub!(' ', '-')
+      dir.gsub!(' ', '-')
+
       multi_commit = false
 
       committer = if obj = commit[:committer]
@@ -258,11 +317,67 @@ module Gollum
 
       filename = Gollum::Page.cname(name)
 
-      committer.add_to_index('', filename, format, data)
+      committer.add_to_index(dir, filename, format, data)
 
       committer.after_commit do |index, sha|
         @access.refresh
-        index.update_working_dir('', filename, format)
+        index.update_working_dir(dir, filename, format)
+      end
+
+      multi_commit ? committer : committer.commit
+    end
+
+    # Public: Rename an existing page without altering content.
+    #
+    # page   - The Gollum::Page to update.
+    # rename - The String extension-less full path of the page (leading '/' is ignored).
+    # commit - The commit Hash details:
+    #          :message   - The String commit message.
+    #          :name      - The String author full name.
+    #          :email     - The String email address.
+    #          :parent    - Optional Grit::Commit parent to this update.
+    #          :tree      - Optional String SHA of the tree to create the
+    #                       index from.
+    #          :committer - Optional Gollum::Committer instance.  If provided,
+    #                       assume that this operation is part of batch of
+    #                       updates and the commit happens later.
+    #
+    # Returns the String SHA1 of the newly written version, or the
+    # Gollum::Committer instance if this is part of a batch update.
+    # Returns false if the operation is a NOOP.
+    def rename_page(page, rename, commit = {})
+      return false if page.nil?
+      return false if rename.nil? or rename.empty?
+
+      (target_dir, target_name) = ::File.split(rename)
+      (source_dir, source_name) = ::File.split(page.path)
+      source_name = page.filename_stripped
+
+      # File.split gives us relative paths with ".", commiter.add_to_index doesn't like that.
+      target_dir = '' if target_dir == '.'
+      source_dir = '' if source_dir == '.'
+      target_dir = target_dir.gsub(/^\//, '')
+
+      # if the rename is a NOOP, abort
+      if source_dir == target_dir and source_name == target_name
+        return false
+      end
+
+      multi_commit = false
+      committer = if obj = commit[:committer]
+        multi_commit = true
+        obj
+      else
+        Committer.new(self, commit)
+      end
+
+      committer.delete(page.path)
+      committer.add_to_index(target_dir, target_name, page.format, page.raw_data, :allow_same_ext)
+
+      committer.after_commit do |index, sha|
+        @access.refresh
+        index.update_working_dir(source_dir, source_name, page.format)
+        index.update_working_dir(target_dir, target_name, page.format)
       end
 
       multi_commit ? committer : committer.commit
@@ -482,14 +597,19 @@ module Gollum
       @repo.git.grep(*args).split("\n").each do |line|
         result = line.split(':')
         result_1 = result[1]
-        file_name = result_1.chomp(::File.extname(result_1))
+        # Remove ext only from known extensions.
+        # test.pdf => test.pdf, test.md => test
+        file_name = Page::valid_page_name?(result_1) ? result_1.chomp(::File.extname(result_1)) :
+                    result_1
         results[file_name] = result[2].to_i
       end
 
       # Use git ls-files '*query*' to search for file names. Grep only searches file content.
       # Spaces are converted to dashes when saving pages to disk.
       @repo.git.ls_files({}, "*#{ query.gsub(' ', '-') }*").split("\n").each do |line|
-        file_name = line.chomp(::File.extname(line))
+        # Remove ext only from known extensions.
+        file_name = Page::valid_page_name?(line) ? line.chomp(::File.extname(line)) :
+                    line
         # If there's not already a result for file_name then
         # the value is nil and nil.to_i is 0.
         results[file_name] = results[file_name].to_i + 1;
@@ -569,6 +689,16 @@ module Gollum
 
     # Toggles mathjax.
     attr_reader :mathjax
+
+    # Toggles user icons. Default: 'none'
+    attr_reader :user_icons
+
+    # Toggles showing all files in files view. Default is false.
+    # When false, only valid pages in the git repo are displayed.
+    attr_reader :show_all
+
+    # Start with collapsed file view. Default: false
+    attr_reader :collapse_tree
 
     # Normalize the data.
     #

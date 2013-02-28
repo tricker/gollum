@@ -1,12 +1,45 @@
+# ~*~ encoding: utf-8 ~*~
 require 'digest/sha1'
 require 'cgi'
 require 'pygments'
 require 'base64'
 
+require File.expand_path '../frontend/helpers', __FILE__
+require File.expand_path '../gitcode', __FILE__
+
+# initialize Pygments
+Pygments.start
+
 module Gollum
 
   class Markup
+    include Precious::Helpers
+
+    @formats = {}
+
+    class << self
+      attr_reader :formats
+
+      # Register a file extension and associated markup type
+      #
+      # ext     - The file extension
+      # name    - The name of the markup type
+      # options - Hash of options:
+      #           regexp - Regexp to match against.
+      #                    Defaults to exact match of ext.
+      #
+      # If given a block, that block will be registered with GitHub::Markup to
+      # render any matching pages
+      def register(ext, name, options = {}, &block)
+        regexp = options[:regexp] || Regexp.new(ext.to_s)
+        @formats[ext] = { :name => name, :regexp => regexp }
+        GitHub::Markup.add_markup(regexp, &block) if block_given?
+      end
+    end
+
     attr_accessor :toc
+    attr_reader   :metadata
+
     # Initialize a new Markup object.
     #
     # page - The Gollum::Page.
@@ -23,10 +56,11 @@ module Gollum
       @dir     = ::File.dirname(page.path)
       @tagmap  = {}
       @codemap = {}
-      @texmap  = {}
       @wsdmap  = {}
       @premap  = {}
       @toc = nil
+      @metadata = nil
+      @to_xml = { :save_with => Nokogiri::XML::Node::SaveOptions::DEFAULT_XHTML ^ 1, :indent => 0, :encoding => 'UTF-8' }
     end
 
     # Render the content with Gollum wiki syntax on top of the file's own
@@ -43,8 +77,9 @@ module Gollum
         @wiki.sanitizer
 
       data = @data.dup
+      data = extract_metadata(data)
+      data = extract_gitcode(data)
       data = extract_code(data)
-      data = extract_tex(data)
       data = extract_wsd(data)
       data = extract_tags(data)
       begin
@@ -63,12 +98,18 @@ module Gollum
       doc,toc = process_headers(doc)
       @toc = @sub_page ? ( @parent_page ? @parent_page.toc_data : "[[_TOC_]]" ) : toc
       yield doc if block_given?
-      data = doc.to_html
+      # nokogiri's save options are ored together. FORMAT has a value of 1 so ^ 1 removes it.
+      # formatting will create extra spaces in pre tags.
+      # https://github.com/sparklemotion/nokogiri/issues/782
+      # DEFAULT_HTML encodes unicode so XHTML is used for proper unicode support in href.
+      data = doc.to_xml( @to_xml )
 
       data = process_toc_tags(data)
-      data = process_tex(data)
       data = process_wsd(data)
-      data.gsub!(/<p><\/p>/, '')
+      data.gsub!(/<p><\/p>/) do
+        ''
+      end
+
       data
     end
 
@@ -80,15 +121,13 @@ module Gollum
     def process_headers(doc)
       toc = nil
       doc.css('h1,h2,h3,h4,h5,h6').each do |h|
-        id = CGI::escape(h.content.gsub(' ','-'))
+        # must escape "
+        h_name = h.content.gsub(' ','-').gsub('"','%22')
+
         level = h.name.gsub(/[hH]/,'').to_i
 
         # Add anchors
-        anchor = Nokogiri::XML::Node.new('a', doc)
-        anchor['class'] = 'anchor'
-        anchor['id'] = id
-        anchor['href'] = '#' + id
-        h.add_child(anchor)
+        h.add_child(%Q{<a class="anchor" id="#{h_name}" href="##{h_name}"></a>})
 
         # Build TOC
         toc ||= Nokogiri::XML::DocumentFragment.parse('<div class="toc"><div class="toc-title">Table of Contents</div></div>')
@@ -105,66 +144,12 @@ module Gollum
           tail_level -= 1
         end
         node = Nokogiri::XML::Node.new('li', doc)
-        node.add_child("<a href='##{id}'>#{h.content}</a>")
+        # % -> %25 so anchors work on Firefox. See issue #475
+        node.add_child(%Q{<a href="##{h_name}">#{h.content}</a>})
         tail.add_child(node)
       end
-      toc = toc.to_xhtml if toc != nil
+      toc = toc.to_xml(@to_xml) if toc != nil
       [doc, toc]
-    end
-
-    #########################################################################
-    #
-    # TeX
-    #
-    #########################################################################
-
-    # Extract all TeX into the texmap and replace with placeholders.
-    #
-    # data - The raw String data.
-    #
-    # Returns the placeholder'd String data.
-    def extract_tex(data)
-      data.gsub(/\\\[\s*(.*?)\s*\\\]/m) do
-        tag = CGI.escapeHTML($1)
-        id  = Digest::SHA1.hexdigest(tag)
-        @texmap[id] = [:block, tag]
-        id
-      end.gsub(/\\\(\s*(.*?)\s*\\\)/m) do
-        tag = CGI.escapeHTML($1)
-        id  = Digest::SHA1.hexdigest(tag)
-        @texmap[id] = [:inline, tag]
-        id
-      end
-    end
-
-    # Process all TeX from the texmap and replace the placeholders with the
-    # final markup.
-    #
-    # data - The String data (with placeholders).
-    #
-    # Returns the marked up String data.
-    def process_tex(data)
-      @texmap.each do |id, spec|
-        type, tex = *spec
-
-        # Obtain the formula with parameters
-        out = nil
-        begin 
-          width, height, align, base64 = Gollum::Tex.render_formula(tex, true)
-
-          # TODO: Should we load the binary inside the html?
-          #out = %{<img width="#{width}" height="#{height}" style="vertical-align: #{align}px;" src="data:image/png;base64,\n#{base64}" alt="#{CGI.escapeHTML(tex)}" />}
-
-          # Use the alignment values from the formula rendering but still use the call to '_tex.png'. Although it will call render_formula()
-          # again, it will use the already cached formula and it might have some advantages from the point of view of browser caching (really not sure here).
-          out = %{<img width="#{width}" height="#{height}" style="vertical-align: #{align}px;" src="#{::File.join(@wiki.base_path, '_tex.png')}?type=#{type}&data=#{Base64.encode64(tex).chomp}" alt="#{CGI.escapeHTML(tex)}" />}
-        rescue # In case of error
-          out = CGI.escapeHTML(tex)
-        end
-        
-        data.gsub!(id, out)
-      end
-      data
     end
 
     #########################################################################
@@ -217,9 +202,13 @@ module Gollum
       @tagmap.each do |id, tag|
         # If it's preformatted, just put the tag back
         if is_preformatted?(data, id)
-          data.gsub!(id, "[[#{tag}]]")
+          data.gsub!(id) do
+            "[[#{tag}]]"
+          end
         else
-          data.gsub!(id, process_tag(tag))
+          data.gsub!(id) do
+            process_tag(tag).gsub('%2F', '/')
+          end
         end
       end
       data
@@ -399,7 +388,13 @@ module Gollum
           link_name = @wiki.page_class.cname(page.name)
           presence  = "present"
         end
-        link = ::File.join(@wiki.base_path, CGI.escape(link_name))
+        link = ::File.join(@wiki.base_path, page ? page.escaped_url_path : CGI.escape(link_name))
+
+        # //page is invalid
+        # strip all duplicate forward slashes using helpers.rb trim_leading_slash
+        # //page => /page
+        link = trim_leading_slash link
+
         %{<a class="internal #{presence}" href="#{link}#{extra}">#{name}</a>}
       end
     end
@@ -411,7 +406,9 @@ module Gollum
     #
     # Returns the marked up String data.
     def process_toc_tags(data)
-      data.gsub!("[[_TOC_]]", @toc.nil? ? '' : @toc)
+      data.gsub!("[[_TOC_]]") do
+        @toc.nil? ? '' : @toc
+      end
       data
     end
 
@@ -420,29 +417,71 @@ module Gollum
     # name - The String absolute or relative path of the file.
     #
     # Returns the Gollum::File or nil if none was found.
-    def find_file(name)
+    def find_file(name, version=@version)
       if name =~ /^\//
-        @wiki.file(name[1..-1], @version)
+        @wiki.file(name[1..-1], version)
       else
         path = @dir == '.' ? name : ::File.join(@dir, name)
-        @wiki.file(path, @version)
+        @wiki.file(path, version)
       end
     end
 
     # Find a page from a given cname.  If the page has an anchor (#) and has
     # no match, strip the anchor and try again.
     #
-    # cname - The String canonical page name.
+    # cname - The String canonical page name including path.
     #
     # Returns a Gollum::Page instance if a page is found, or an Array of
     # [Gollum::Page, String extra] if a page without the extra anchor data
     # is found.
     def find_page_from_name(cname)
-      if page = @wiki.page(cname)
+      slash = cname.rindex('/')
+
+      unless slash.nil?
+        name = cname[slash+1..-1]
+        path = cname[0..slash]
+        page = @wiki.paged(name, path)
+      else
+        page = @wiki.paged(cname, '/') || @wiki.page(cname)
+      end
+
+      if page
         return page
       end
       if pos = cname.index('#')
         [@wiki.page(cname[0...pos]), cname[pos..-1]]
+      end
+    end
+
+    #########################################################################
+    #
+    # Gitcode - fetch code from github search path and replace the contents
+    #           to a code-block that gets run the next parse.
+    #           Acceptable formats:
+    #              ```language:local-file.ext```
+    #              ```language:/abs/other-file.ext```
+    #              ```language:github/gollum/master/somefile.txt```
+    #
+    #########################################################################
+
+    def extract_gitcode data
+      data.gsub /^[ \t]*``` ?([^:\n\r]+):([^`\n\r]+)```/ do
+        contents = ''
+        # Use empty string if $2 is nil.
+        uri = $2 || ''
+        # Detect local file.
+        if uri[0..6] != 'github/'
+            if file = self.find_file(uri, @wiki.ref)
+              contents = file.raw_data
+            else
+              # How do we communicate a render error?
+              next "File not found: #{Rack::Utils::escape_html(uri)}"
+            end
+        else
+          contents = Gollum::Gitcode.new(uri).contents
+        end
+
+        "```#{$1}\n#{contents}\n```\n"
       end
     end
 
@@ -458,7 +497,36 @@ module Gollum
     #
     # Returns the placeholder'd String data.
     def extract_code(data)
-      data.gsub!(/^([ \t]*)``` ?([^\r\n]+)?\r?\n(.+?)\r?\n\1```\r?$/m) do
+      data.gsub!(/^([ \t]*)(~~~+) ?([^\r\n]+)?\r?\n(.+?)\r?\n\1(~~~+)[ \t\r]*$/m) do
+        m_indent = $1
+        m_start  = $2 # ~~~
+        m_lang   = $3
+        m_code   = $4
+        m_end    = $5 # ~~~
+
+        # start and finish tilde fence must be the same length
+        return '' if m_start.length != m_end.length
+
+        lang   = m_lang ? m_lang.strip : nil
+        id     = Digest::SHA1.hexdigest("#{lang}.#{m_code}")
+        cached = check_cache(:code, id)
+
+        # extract lang from { .ruby } or { #stuff .ruby .indent }
+        # see http://johnmacfarlane.net/pandoc/README.html#delimited-code-blocks
+
+        if lang
+            lang = lang.match(/\.([^}\s]+)/)
+            lang = lang[1] unless lang.nil?
+        end
+
+        @codemap[id] = cached   ?
+          { :output => cached } :
+          { :lang => lang, :code => m_code, :indent => m_indent }
+
+        "#{m_indent}#{id}" # print the SHA1 ID with the proper indentation
+      end
+
+      data.gsub!(/^([ \t]*)``` ?([^\r\n]+)?\r?\n(.+?)\r?\n\1```[ \t]*\r?$/m) do
         lang   = $2 ? $2.strip : nil
         id     = Digest::SHA1.hexdigest("#{lang}.#{$3}")
         cached = check_cache(:code, id)
@@ -478,7 +546,9 @@ module Gollum
     # regex     - A regex to match whitespace
     def remove_leading_space(code, regex)
       if code.lines.all? { |line| line =~ /\A\r?\n\Z/ || line =~ regex }
-        code.gsub!(regex, '')
+        code.gsub!(regex) do
+          ''
+        end
       end
     end
 
@@ -504,13 +574,17 @@ module Gollum
         blocks << [spec[:lang], code]
       end
 
-      highlighted = begin
+      highlighted = []
+      blocks.each do |lang, code|
         encoding ||= 'utf-8'
-        blocks.map { |lang, code|
-          Pygments.highlight(code, :lexer => lang, :options => {:encoding => encoding.to_s})
-        }
-      rescue ::RubyPython::PythonError
-        []
+        begin
+          # must set startinline to true for php to be highlighted without <?
+          # http://pygments.org/docs/lexers/
+          hl_code = Pygments.highlight(code, :lexer => lang, :options => {:encoding => encoding.to_s, :startinline => true})
+        rescue
+          hl_code = code
+        end
+        highlighted << hl_code
       end
 
       @codemap.each do |id, spec|
@@ -522,7 +596,9 @@ module Gollum
             "<pre><code>#{CGI.escapeHTML(spec[:code])}</code></pre>"
           end
         end
-        data.gsub!(id, body)
+        data.gsub!(id) do
+          body
+        end
       end
 
       data
@@ -558,8 +634,31 @@ module Gollum
       @wsdmap.each do |id, spec|
         style = spec[:style]
         code = spec[:code]
-        data.gsub!(id, Gollum::WebSequenceDiagram.new(code, style).to_tag)
+        data.gsub!(id) do
+          Gollum::WebSequenceDiagram.new(code, style).to_tag
+        end
       end
+      data
+    end
+
+    #########################################################################
+    #
+    # Metadata
+    #
+    #########################################################################
+
+    # Extract metadata for data and build metadata table. Metadata
+    # is content found between markers, and must
+    # be a valid YAML mapping.
+    #
+    # Because ri and ruby 1.8.7 are awesome, the markers can't
+    # be included in this documentation without triggering
+    # `Unhandled special: Special: type=17`
+    # Please read the source code for the exact markers
+    #
+    # Returns the String of formatted data with metadata removed.
+    def extract_metadata(data)
+      @metadata = {}
       data
     end
 

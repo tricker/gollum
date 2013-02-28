@@ -1,19 +1,9 @@
+# ~*~ encoding: utf-8 ~*~
 module Gollum
   class Page
     include Pagination
 
     Wiki.page_class = self
-
-    VALID_PAGE_RE = /^(.+)\.(md|mkdn?|mdown|markdown|textile|rdoc|org|creole|re?st(\.txt)?|asciidoc|pod|(media)?wiki)$/i
-    FORMAT_NAMES = { :markdown  => "Markdown",
-                     :textile   => "Textile",
-                     :rdoc      => "RDoc",
-                     :org       => "Org-mode",
-                     :creole    => "Creole",
-                     :rest      => "reStructuredText",
-                     :asciidoc  => "AsciiDoc",
-                     :mediawiki => "MediaWiki",
-                     :pod       => "Pod" }
 
     # Sets a Boolean determing whether this page is a historical version.
     #
@@ -25,13 +15,29 @@ module Gollum
     # Returns a Page
     attr_accessor :parent_page
 
-    # Checks if a filename has a valid extension understood by GitHub::Markup.
+
+    # Checks a filename against the registered markup extensions
+    #
+    # filename - String filename, like "Home.md"
+    #
+    # Returns e.g. ["Home", :markdown], or [] if the extension is unregistered
+    def self.parse_filename(filename)
+      return [] unless filename =~ /^(.+)\.([a-zA-Z]\w*)$/i
+      pref, ext = $1, $2
+
+      Gollum::Markup.formats.each_pair do |name, format|
+        return [pref, name] if ext =~ format[:regexp]
+      end
+      []
+    end
+
+    # Checks if a filename has a valid, registered extension
     #
     # filename - String filename, like "Home.md".
     #
     # Returns the matching String basename of the file without the extension.
     def self.valid_filename?(filename)
-      filename && filename.to_s =~ VALID_PAGE_RE && $1
+      self.parse_filename(filename).first
     end
 
     # Checks if a filename has a valid extension understood by GitHub::Markup.
@@ -50,34 +56,9 @@ module Gollum
     #
     # filename - The String filename.
     #
-    # Returns the Symbol format of the page. One of:
-    #   [ :markdown | :textile | :rdoc | :org | :rest | :asciidoc | :pod |
-    #     :roff ]
+    # Returns the Symbol format of the page; one of the registered format types
     def self.format_for(filename)
-      case filename.to_s
-        when /\.(md|mkdn?|mdown|markdown)$/i
-          :markdown
-        when /\.(textile)$/i
-          :textile
-        when /\.(rdoc)$/i
-          :rdoc
-        when /\.(org)$/i
-          :org
-        when /\.(creole)$/i
-          :creole
-        when /\.(re?st(\.txt)?)$/i
-          :rest
-        when /\.(asciidoc)$/i
-          :asciidoc
-        when /\.(pod)$/i
-          :pod
-        when /\.(\d)$/i
-          :roff
-        when /\.(media)?wiki$/i
-          :mediawiki
-        else
-          nil
-      end
+      self.parse_filename(filename).last
     end
 
     # Reusable filter to turn a filename (without path) into a canonical name.
@@ -158,13 +139,34 @@ module Gollum
     # Returns the String url_path
     def url_path
       path = if self.path.include?('/')
-        self.path.sub(/\/.+$/, '/')
+        self.path.sub(/\/[^\/]+$/, '/')
       else
         ''
       end
 
       path << Page.cname(self.name, '-', '-')
       path
+    end
+
+    # Public: Defines title for page.rb
+    #
+    # Returns the String title
+    def url_path_title
+      metadata_title || url_path.gsub("-", " ")
+    end
+
+    # Public: Metadata title
+    #
+    # Set with <!-- --- title: New Title --> in page content
+    #
+    # Returns the String title or nil if not defined
+    def metadata_title
+      if metadata
+        title = metadata['title']
+        return title unless title.nil?
+      end
+
+      nil
     end
 
     # Public: The url_path, but CGI escaped.
@@ -217,11 +219,17 @@ module Gollum
       markup_class.toc
     end
 
+    # Public: Embedded metadata.
+    #
+    # Returns Hash of metadata.
+    def metadata()
+      formatted_data if markup_class.metadata == nil
+      markup_class.metadata
+    end
+
     # Public: The format of the page.
     #
-    # Returns the Symbol format of the page. One of:
-    #   [ :markdown | :textile | :rdoc | :org | :rest | :asciidoc | :pod |
-    #     :roff ]
+    # Returns the Symbol format of the page; one of the registered format types
     def format
       self.class.format_for(@blob.name)
     end
@@ -319,7 +327,7 @@ module Gollum
     # Returns the String canonical name.
     def self.cname(name, char_white_sub = '-', char_other_sub = '-')
       name.respond_to?(:gsub) ?
-        name.gsub(%r{\s},char_white_sub).gsub(%r{[/<>+]}, char_other_sub) :
+        name.gsub(%r{\s},char_white_sub).gsub(%r{[<>+]}, char_other_sub) :
         ''
     end
 
@@ -329,17 +337,7 @@ module Gollum
     #
     # Returns the String extension (no leading period).
     def self.format_to_ext(format)
-      case format
-        when :markdown  then 'md'
-        when :textile   then 'textile'
-        when :rdoc      then 'rdoc'
-        when :org       then 'org'
-        when :creole    then 'creole'
-        when :rest      then 'rest'
-        when :asciidoc  then 'asciidoc'
-        when :pod       then 'pod'
-        when :mediawiki then 'mediawiki'
-      end
+      format == :markdown ? "md" : format.to_s
     end
 
     #########################################################################
@@ -364,9 +362,9 @@ module Gollum
     # version - The String version ID to find.
     #
     # Returns a Gollum::Page or nil if the page could not be found.
-    def find(name, version)
+    def find(name, version, dir = nil, exact = false)
       map = @wiki.tree_map_for(version.to_s)
-      if page = find_page_in_tree(map, name)
+      if page = find_page_in_tree(map, name, dir, exact)
         page.version    = version.is_a?(Grit::Commit) ?
           version : @wiki.commit_for(version)
         page.historical = page.version.to_s == version.to_s
@@ -383,11 +381,13 @@ module Gollum
     #               to be in.  The string should
     #
     # Returns a Gollum::Page or nil if the page could not be found.
-    def find_page_in_tree(map, name, checked_dir = nil)
+    def find_page_in_tree(map, name, checked_dir = nil, exact = false)
       return nil if !map || name.to_s.empty?
       if checked_dir = BlobEntry.normalize_dir(checked_dir)
         checked_dir.downcase!
       end
+
+      checked_dir = '' if exact && checked_dir.nil?
 
       map.each do |entry|
         next if entry.name.to_s.empty?

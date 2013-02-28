@@ -19,8 +19,47 @@ module Precious
             :selected => @page.version.id == v.id,
             :author   => v.author.name.respond_to?(:force_encoding) ? v.author.name.force_encoding('UTF-8') : v.author.name,
             :message  => v.message.respond_to?(:force_encoding) ? v.message.force_encoding('UTF-8') : v.message,
-            :date     => v.committed_date.strftime("%B %d, %Y"),
-            :gravatar => Digest::MD5.hexdigest(v.author.email) }
+            :date     => v.authored_date.strftime("%B %d, %Y"),
+            :gravatar => Digest::MD5.hexdigest(v.author.email),
+            :identicon => self._identicon_code(v.author.email),
+          }
+        end
+      end
+
+      # http://stackoverflow.com/questions/9445760/bit-shifting-in-ruby
+      def left_shift int, shift
+        r = ((int & 0xFF) << (shift & 0x1F)) & 0xFFFFFFFF
+        # 1>>31, 2**32
+        (r & 2147483648) == 0 ? r : r - 4294967296
+      end
+
+      def string_to_code string
+        # sha bytes
+        b = [Digest::SHA1.hexdigest(string)[0,20]].pack('H*').bytes.to_a
+        # Thanks donpark's IdenticonUtil.java for this.
+        # Match the following Java code
+        # ((b[0] & 0xFF) << 24) | ((b[1] & 0xFF) << 16) |
+        #	 ((b[2] & 0xFF) << 8) | (b[3] & 0xFF)
+
+        return left_shift(b[0], 24) |
+               left_shift(b[1], 16) |
+               left_shift(b[2], 8)  |
+               b[3] & 0xFF
+      end
+
+      def _identicon_code(blob)
+        string_to_code blob + @request.host
+      end
+
+      def use_identicon
+          @page.wiki.user_icons == 'identicon'
+      end
+
+      def partial(name)
+        if name == :author_template
+          self.class.partial("history_authors/#{@page.wiki.user_icons}")
+        else
+          super
         end
       end
 
@@ -29,14 +68,16 @@ module Precious
         if @page_num == 1
           %(<span class="disabled">#{label}</span>)
         else
-          %(<a href="/history/#{@page.name}?page=#{@page_num-1}" hotkey="h">#{label}</a>)
+          link = url("/history/#{@page.name}?page=#{@page_num-1}")
+          %(<a href="#{link}" hotkey="h">#{label}</a>)
         end
       end
 
       def next_link
         label = "Next &raquo;"
         if @versions.size == Gollum::Page.per_page
-          %(<a href="/history/#{@page.name}?page=#{@page_num+1}" hotkey="l">#{label}</a>)
+          link = "/history/#{@page.name}?page=#{@page_num+1}"
+          %(<a href="#{link}" hotkey="l">#{label}</a>)
         else
           %(<span class="disabled">#{label}</span>)
         end

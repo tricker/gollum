@@ -16,7 +16,7 @@ context "Page" do
     page = @wiki.page('Bilbo Baggins')
     assert_equal Gollum::Page, page.class
     assert page.raw_data =~ /^# Bilbo Baggins\n\nBilbo Baggins/
-    assert page.formatted_data =~ %r{<h1>Bilbo Baggins<a class="anchor" id="Bilbo-Baggins" href="#Bilbo-Baggins"></a>\n</h1>\n\n<p>Bilbo Baggins}
+    assert page.formatted_data =~ %r{<h1>Bilbo Baggins<a class="anchor" id="Bilbo-Baggins" href="#Bilbo-Baggins"></a></h1>\n\n<p>Bilbo Baggins}
     assert_equal 'Bilbo-Baggins.md', page.path
     assert_equal :markdown, page.format
     assert_equal @wiki.repo.commits.first.id, page.version.id
@@ -99,7 +99,8 @@ context "Page" do
   test "cname" do
     assert_equal "Foo", Gollum::Page.cname("Foo")
     assert_equal "Foo-Bar", Gollum::Page.cname("Foo Bar")
-    assert_equal "Foo---Bar", Gollum::Page.cname("Foo / Bar")
+    # / is now a directory delimiter so it must be preserved
+    assert_equal "Foo-/-Bar", Gollum::Page.cname("Foo / Bar")
     assert_equal "José", Gollum::Page.cname("José")
     assert_equal "モルドール", Gollum::Page.cname("モルドール")
   end
@@ -226,5 +227,27 @@ context "within a sub-directory" do
     assert page.header.raw_data =~ /^Hobbits/
     assert page.footer.raw_data =~ /^Lord of the Rings/
   end
+
+if $METADATA
+  test "get metadata on page" do
+    page = @wiki.page('Elrond')
+    assert_equal Gollum::Page, page.class
+    assert_equal 'elf', page.metadata['race']
+  end
 end
 
+end
+
+context "with custom markup engines" do
+  setup do
+    Gollum::Markup.register(:redacted, "Redacted", :regexp => /rd/) { |content| content.gsub /\S/, '-' }
+    @wiki = Gollum::Wiki.new(testpath("examples/lotr.git"))
+  end
+
+  test "should use the specified engine" do
+    page = @wiki.page('Riddles')
+    assert_equal :redacted, page.format
+    assert page.raw_data.include? 'Time'
+    assert page.raw_data =~ /^[\s\-]*$/
+  end
+end
