@@ -16,8 +16,8 @@ context "Frontend" do
   end
 
   test "urls transform unicode" do
-    header = '_Header'
-    footer = '_Footer'
+    header  = '_Header'
+    footer  = '_Footer'
     sidebar = '_Sidebar'
 
     # header, footer, and sidebar must be preserved
@@ -29,13 +29,13 @@ context "Frontend" do
     # spaces are converted to dashes in URLs
     # and in file names saved to disk
     # urls are not case sensitive
-    assert_equal 'title-space', 'Title Space'.to_url
+    assert_equal 'Title-Space', 'Title Space'.to_url
 
     # ascii only file names prevent UTF8 issues
     # when using git repos across operating systems
     # as this test demonstrates, translation is not
     # great
-    assert_equal 'm-plus-f', 'μ†ℱ'.to_url
+    assert_equal 'm-plus-F', 'μ†ℱ'.to_url
   end
 
   test "utf-8 kcode" do
@@ -63,9 +63,13 @@ context "Frontend" do
     assert_match /<pre><code>one\ntwo\nthree\nfour\n<\/code><\/pre>\n/m, last_response.body
   end
 
+  def nfd utf8
+    TwitterCldr::Normalization::NFD.normalize utf8
+  end
+
   test "UTF-8 headers href preserved" do
     page = 'utfh1'
-    text = '한글'
+    text = nfd('한글')
 
     # don't use h1 or it will be promoted to replace file name
     # which doesn't generate a normal header link
@@ -74,7 +78,10 @@ context "Frontend" do
 
     get page
 
-    assert_match /<h2>#{text}<a class="anchor" id="#{text}" href="##{text}"><\/a><\/h2>/, last_response.body
+    expected = "<h2><a class=\"anchor\" id=\"#{text}\" href=\"##{text}\"><i class=\"fa fa-link\"></i></a>#{text}</h2>"
+    actual   = nfd(last_response.body)
+
+    assert_match /#{expected}/, actual
   end
 
   test "retain edit information" do
@@ -101,7 +108,7 @@ context "Frontend" do
   test "edits page" do
     page_1 = @wiki.page('A')
     post "/edit/A", :content => 'abc', :page => 'A',
-      :format => page_1.format, :message => 'def'
+         :format             => page_1.format, :message => 'def'
     follow_redirect!
     assert last_response.ok?
 
@@ -112,42 +119,56 @@ context "Frontend" do
     assert_not_equal page_1.version.sha, page_2.version.sha
   end
 
+  test "edit page with empty message" do
+    page_1 = @wiki.page('A')
+    post "/edit/A", :content => 'abc', :page => 'A',
+         :format             => page_1.format
+    follow_redirect!
+    assert last_response.ok?
+
+    @wiki.clear_cache
+    page_2 = @wiki.page(page_1.name)
+    assert_equal 'abc', page_2.raw_data
+    assert_equal '[no message]', page_2.version.message
+    assert_not_equal page_1.version.sha, page_2.version.sha
+  end
+
   test "edit page with slash" do
     page_1 = @wiki.page('A')
     post "/edit/A", :content => 'abc', :page => 'A', :path => '/////',
-      :format => page_1.format, :message => 'def'
+         :format             => page_1.format, :message => 'def'
     follow_redirect!
     assert last_response.ok?
   end
 
   test "edits page header footer and sidebar" do
-    commits = @wiki.repo.commits('master').size
-    page_1  = @wiki.page('A')
+    commits  = @wiki.repo.commits('master').size
+    page_1   = @wiki.page('A')
     header_1 = page_1.header
-    foot_1  = page_1.footer
-    side_1  = page_1.sidebar
+    foot_1   = page_1.footer
+    side_1   = page_1.sidebar
 
     post "/edit/A", :header => 'header',
-      :footer => 'footer', :page => "A", :sidebar => 'sidebar', :message => 'def'
+         :footer            => 'footer', :page => "A", :sidebar => 'sidebar', :message => 'def'
     follow_redirect!
     assert_equal "/A", last_request.fullpath
     assert last_response.ok?
 
     @wiki.clear_cache
-    page_2 = @wiki.page(page_1.name)
+    page_2   = @wiki.page(page_1.name)
     header_2 = page_2.header
-    foot_2 = page_2.footer
-    side_2 = page_2.sidebar
+    foot_2   = page_2.footer
+    side_2   = page_2.sidebar
     assert_equal page_1.raw_data, page_2.raw_data
 
     assert_equal 'header', header_2.raw_data
     assert_equal 'footer', foot_2.raw_data
-    assert_equal 'def',    foot_2.version.message
+    assert_equal 'def', foot_2.version.message
     assert_not_equal foot_1.version.sha, foot_2.version.sha
     assert_not_equal header_1.version.sha, header_2.version.sha
 
     assert_equal 'sidebar', side_2.raw_data
-    assert_equal 'def',     side_2.version.message
+    assert_equal 'def', side_2.version.message
     assert_not_equal side_1.version.sha, side_2.version.sha
     assert_equal commits+1, @wiki.repo.commits('master').size
   end
@@ -227,7 +248,7 @@ context "Frontend" do
 
   test "creates page" do
     post "/create", :content => 'abc', :page => "D",
-      :format => 'markdown', :message => 'def'
+         :format             => 'markdown', :message => 'def'
     follow_redirect!
     assert last_response.ok?
 
@@ -238,8 +259,8 @@ context "Frontend" do
 
   test "creates pages with escaped characters in title" do
     post "/create", :content => 'abc', :page => 'Title with spaces',
-      :format => 'markdown', :message => 'foo'
-    assert_equal 'http://example.org/title-with-spaces', last_response.headers['Location']
+         :format             => 'markdown', :message => 'foo'
+    assert_equal 'http://example.org/Title-with-spaces', last_response.headers['Location']
     get "/Title-with-spaces"
     assert_match /abc/, last_response.body
   end
@@ -262,10 +283,10 @@ context "Frontend" do
 
   test "accessing redirectory redirects to index page" do
     post "/create", :content => 'abc', :page => 'Home', :path => '/foo/',
-      :format => 'markdown', :message => 'foo'
+         :format             => 'markdown', :message => 'foo'
 
-    assert_equal "http://example.org/foo/home", last_response.headers['Location']
-   
+    assert_equal "http://example.org/foo/Home", last_response.headers['Location']
+
     follow_redirect!
     assert last_response.ok?
   end
@@ -286,12 +307,31 @@ context "Frontend" do
     assert last_response.ok?
   end
 
+  test "create sets the correct path for a relative path subdirectory" do
+    dir  = "foodir"
+    name = "#{dir}/bar"
+    get "/create/#{name}"
+    assert_match(/\/#{dir}/, last_response.body)
+    assert_no_match(/[^\/]#{dir}/, last_response.body)
+  end
+
+  test "create sets the correct path for a relative path subdirectory with the page file directory set" do
+    Precious::App.set(:wiki_options, { :page_file_dir => "foo" })
+    dir  = "bardir"
+    name = "#{dir}/baz"
+    get "/create/foo/#{name}"
+    assert_match(/\/#{dir}/, last_response.body)
+    assert_no_match(/[^\/]#{dir}/, last_response.body)
+    # reset page_file_dir
+    Precious::App.set(:wiki_options, { :page_file_dir => nil })
+  end
+
   test "edit returns nil for non-existant page" do
     # post '/edit' fails. post '/edit/' works.
     page = 'not-real-page'
     path = '/'
     post '/edit/', :content => 'edit_msg',
-      :page => page, :path => path, :message => ''
+         :page              => page, :path => path, :message => ''
     page_e = @wiki.paged(page, path)
     assert_equal nil, page_e
   end
@@ -301,7 +341,7 @@ context "Frontend" do
     path = 'a/b/' # path must end with /
 
     post '/create', :content => 'create_msg', :page => page,
-      :path => path, :format => 'markdown', :message => ''
+         :path               => path, :format => 'markdown', :message => ''
     page_c = @wiki.paged(page, path)
     assert_equal 'create_msg', page_c.raw_data
 
@@ -310,7 +350,7 @@ context "Frontend" do
 
     # post '/edit' fails. post '/edit/' works.
     post '/edit/', :content => 'edit_msg',
-      :page => page, :path => path, :message => ''
+         :page              => page, :path => path, :message => ''
     page_e = @wiki.paged(page, path)
     assert_equal 'edit_msg', page_e.raw_data
 
@@ -329,7 +369,7 @@ context "Frontend" do
   test "guards against creation of existing page" do
     name = "A"
     post "/create", :content => 'abc', :page => name,
-      :format => 'markdown', :message => 'def'
+         :format             => 'markdown', :message => 'def'
 
     assert last_response.ok?
 
@@ -341,7 +381,7 @@ context "Frontend" do
   test "delete a page" do
     name = "deleteme"
     post "/create", :content => 'abc', :page => name,
-      :format => 'markdown', :message => 'foo'
+         :format             => 'markdown', :message => 'foo'
     page = @wiki.page(name)
     assert_equal 'abc', page.raw_data
 
@@ -380,6 +420,7 @@ context "Frontend" do
     page2 = @wiki.page('B')
     assert_not_equal page1.version.sha, page2.version.sha
     assert_equal "INITIAL", page2.raw_data.strip
+#    assert_equal "Revert commit #7c45b5f", page2.version.message
   end
 
   test "reverts multiple commits" do
@@ -395,7 +436,7 @@ context "Frontend" do
     assert_equal "INITIAL", page2.raw_data.strip
   end
 =end
-
+=begin
   test "cannot revert conflicting commit" do
     page1 = @wiki.page('A')
 
@@ -406,6 +447,7 @@ context "Frontend" do
     page2 = @wiki.page('A')
     assert_equal page1.version.sha, page2.version.sha
   end
+=end
 =begin
   # redirects are now handled by class MapGollum in bin/gollum
   # they should be set in config.ru
@@ -427,23 +469,77 @@ context "Frontend" do
     Precious::App.set(:wiki_options, { :base_path => nil })
   end
 =end
-  
+
   test "author details in session are used" do
     page1 = @wiki.page('A')
-    
+
     gollum_author = { :name => 'ghi', :email => 'jkl' }
-    session = { 'gollum.author' => gollum_author }
-    
+    session       = { 'gollum.author' => gollum_author }
+
     post "/edit/A", { :content => 'abc', :page => 'A', :format => page1.format, :message => 'def' }, { 'rack.session' => session }
     follow_redirect!
     assert last_response.ok?
-    
+
     @wiki.clear_cache
     page2 = @wiki.page(page1.name)
-    
+
     author = page2.version.author
     assert_equal 'ghi', author.name
     assert_equal 'jkl', author.email
+  end
+
+  test "do not add custom.js by default" do
+    page = 'nocustom'
+    text = 'nope none'
+
+    @wiki.write_page(page, :markdown, text,
+                     { :name => 'user1', :email => 'user1' });
+
+    get page
+    assert_no_match /custom.js/, last_response.body
+  end
+
+  test "add custom.js if setting" do
+    Precious::App.set(:wiki_options, { :js => true })
+    page = 'yaycustom'
+    text = 'customized!'
+
+    @wiki.write_page(page, :markdown, text,
+                     { :name => 'user1', :email => 'user1' });
+
+    get page
+    assert_match /custom.js/, last_response.body
+    Precious::App.set(:wiki_options, { :js => nil })
+  end
+
+  test "show edit page with header and footer and sidebar of multibyte" do
+    post "/create",
+         :content => 'りんご',
+         :page    => 'Multibyte', :format => :markdown, :message => 'mesg'
+
+    post "/edit/Multibyte",
+         :content => 'りんご', :header => 'みかん', :footer => 'バナナ', :sidebar => 'スイカ',
+         :page    => 'Multibyte', :format => :markdown, :message => 'mesg'
+
+    get "edit/Multibyte"
+
+    assert last_response.ok?
+    assert_match /りんご/, last_response.body
+    assert_match /みかん/, last_response.body
+    assert_match /バナナ/, last_response.body
+    assert_match /スイカ/, last_response.body
+  end
+
+  test "add noindex tags to history pages" do
+    get "A"
+
+    assert last_response.ok?
+    assert_no_match /meta name="robots" content="noindex, nofollow"/, last_response.body
+
+    get "A/fc66539528eb96f21b2bbdbf557788fe8a1196ac"
+
+    assert last_response.ok?
+    assert_match /meta name="robots" content="noindex, nofollow"/, last_response.body
   end
 
   def app
@@ -470,11 +566,13 @@ context "Frontend with lotr" do
   # .
   # ├── Bilbo-Baggins.md
   # ├── Data.csv
+  # |-- Data-Two.csv -> Data.csv
   # ├── Gondor
   # │   ├── Boromir.md
   # │   ├── _Footer.md
   # │   ├── _Header.md
   # │   └── _Sidebar.md
+  # |-- Hobbit.md -> Bilbo-Baggins.md
   # ├── Home.textile
   # ├── Mordor
   # │   ├── Eye-Of-Sauron.md
@@ -513,12 +611,23 @@ context "Frontend with lotr" do
     assert body.include?("Eye Of Sauron"), "/pages/Mordor/ should include the page 'Eye Of Sauron'"
   end
 
+  test "symbolic link pages" do
+    get "/Hobbit"
+    assert_match /Bilbo Baggins/, last_response.body
+  end
+
+  test "streaming files to browser" do
+    get "/Data.csv"
+    assert last_response.ok?
+    assert last_response.headers.include? 'Content-Disposition'
+  end
+
   # base path requires 'map' in a config.ru to work correctly.
   test "create pages within sub-directories using base path" do
     Precious::App.set(:wiki_options, { :base_path => 'wiki' })
     page = 'path'
     post "/create", :content => '123', :page => page,
-      :path => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
+         :path               => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
     # should be wiki/Mordor/path
     assert_equal 'http://example.org/Mordor/' + page, last_response.headers['Location']
     get '/Mordor/' + page
@@ -530,7 +639,7 @@ context "Frontend with lotr" do
 
   test "create pages within sub-directories using page file dir" do
     post "/create", :content => 'one two', :page => 'base',
-      :path => 'wiki/Mordor', :format => 'markdown', :message => 'oooh, scary'
+         :path               => 'wiki/Mordor', :format => 'markdown', :message => 'oooh, scary'
     assert_equal 'http://example.org/wiki/Mordor/base', last_response.headers['Location']
     get "/wiki/Mordor/base"
 
@@ -540,27 +649,27 @@ context "Frontend with lotr" do
 
   test "create pages within sub-directories" do
     post "/create", :content => 'big smelly creatures', :page => 'Orc',
-      :path => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
-    assert_equal 'http://example.org/Mordor/orc', last_response.headers['Location']
+         :path               => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
+    assert_equal 'http://example.org/Mordor/Orc', last_response.headers['Location']
     get "/Mordor/Orc"
     assert_match /big smelly creatures/, last_response.body
 
     post "/create", :content => 'really big smelly creatures', :page => 'Uruk Hai',
-      :path => 'Mordor', :format => 'markdown', :message => 'oooh, very scary'
-    assert_equal 'http://example.org/Mordor/uruk-hai', last_response.headers['Location']
+         :path               => 'Mordor', :format => 'markdown', :message => 'oooh, very scary'
+    assert_equal 'http://example.org/Mordor/Uruk-Hai', last_response.headers['Location']
     get "/Mordor/Uruk-Hai"
     assert_match /really big smelly creatures/, last_response.body
   end
 
   test "edit pages within sub-directories" do
     post "/create", :content => 'big smelly creatures', :page => 'Orc',
-      :path => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
+         :path               => 'Mordor', :format => 'markdown', :message => 'oooh, scary'
 
-    assert_equal 'http://example.org/Mordor/orc', last_response.headers['Location']
+    assert_equal 'http://example.org/Mordor/Orc', last_response.headers['Location']
 
     post "/edit/Mordor/Orc", :content => 'not so big smelly creatures',
-      :page => 'Orc', :path => 'Mordor', :message => 'minor edit'
-    assert_equal 'http://example.org/Mordor/orc', last_response.headers['Location']
+         :page                        => 'Orc', :path => 'Mordor', :message => 'minor edit'
+    assert_equal 'http://example.org/Mordor/Orc', last_response.headers['Location']
 
     get "/Mordor/Orc"
     assert_match /not so big smelly creatures/, last_response.body
