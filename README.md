@@ -7,6 +7,8 @@ gollum -- A wiki built on top of Git
 
 ## DESCRIPTION
 
+**New: Gollum is now [compatible with JRuby](https://github.com/gollum/gollum/wiki/Git-adapters#rjgit-java). Just run `gem install gollum` to install.**
+
 Gollum is a simple wiki system built on top of Git.
 
 Gollum wikis are simply Git repositories that adhere to a specific format.
@@ -23,9 +25,9 @@ Gollum follows the rules of [Semantic Versioning](http://semver.org/) and uses
 ## SYSTEM REQUIREMENTS
 
 - Python 2.5+ (2.7.3 recommended)
-- Ruby 1.9.3+ (1.9.3 recommended)
+- Ruby 1.9.3+ (1.9.3 recommended) (JRuby compatible!)
 - Unix like operating system (OS X, Ubuntu, Debian, and more)
-- Will not work on Windows (because of [grit](https://github.com/github/grit))
+- Will not work on Windows with the default [grit](https://github.com/github/grit) adapter, but might work via JRuby (please let us know!)
 
 ## SECURITY
 
@@ -53,14 +55,14 @@ separately install the necessary dependencies for each format. You only need
 to install the dependencies for the formats that you plan to use.
 
 * [AsciiDoc](http://asciidoctor.org) -- `gem install asciidoctor`
-* [Creole](http://wikicreole.org/) -- `gem install creole`
+* [Creole](http://www.wikicreole.org/) -- `gem install creole`
 * [Markdown](http://daringfireball.net/projects/markdown/) -- `gem install redcarpet`
 * [GitHub Flavored Markdown](https://help.github.com/articles/github-flavored-markdown) -- `gem install github-markdown`
 * [Org](http://orgmode.org/) -- `gem install org-ruby`
 * [Pod](http://search.cpan.org/dist/perl/pod/perlpod.pod) -- `Pod::Simple::HTML` comes with Perl >= 5.10. Lower versions should install Pod::Simple from CPAN.
 * [RDoc](http://rdoc.sourceforge.net/)
 * [ReStructuredText](http://docutils.sourceforge.net/rst.html) -- `easy_install docutils`
-* [Textile](http://www.textism.com/tools/textile/) -- `gem install RedCloth`
+* [Textile](http://en.wikipedia.org/wiki/Textile_(markup_language)) -- `gem install RedCloth`
 * [MediaWiki](http://www.mediawiki.org/wiki/Help:Formatting) -- `gem install wikicloth`
 
 [bundler]: http://gembundler.com/
@@ -126,9 +128,8 @@ Note that the gollum server will not run on Windows because of [an issue](https:
 
 ### RACK
 
-You can also run gollum with any rack-compatible server by placing this config.ru
-file inside your wiki repository. This allows you to utilize any Rack middleware
-like Rack::Auth, OmniAuth, etc.
+You can also run gollum with any rack-compatible server by placing configuring a config.ru
+file. This allows you to utilize any Rack middleware like Rack::Auth, OmniAuth, etc. See below for an example of a `config.ru`. You can define all the [options available on the command line](#running) by configuring the app's `:wiki_options` hash. See [here](https://github.com/gollum/gollum/wiki/Using-Gollum-with-Rack) for the names of the options corresponding to the command line switches.  
 
 ```ruby
 #!/usr/bin/env ruby

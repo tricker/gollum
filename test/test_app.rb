@@ -77,8 +77,7 @@ context "Frontend" do
                      { :name => 'user1', :email => 'user1' });
 
     get page
-
-    expected = "<h2><a class=\"anchor\" id=\"_#{text}\" href=\"#_#{text}\"><i class=\"fa fa-link\"></i></a>#{text}</h2>"
+    expected = "<h2><a class=\"anchor\" (href|id)=\"(#)?#{text}\" (href|id)=\"(#)?#{text}\"><i class=\"fa fa-link\"></i></a>#{text}</h2>"
     actual   = nfd(last_response.body)
 
     assert_match /#{expected}/, actual
@@ -409,7 +408,6 @@ context "Frontend" do
     @wiki = Gollum::Wiki.new(@path)
     Precious::App.set(:gollum_path, @path)
     Precious::App.set(:wiki_options, {})
-
     post "/preview", :content => 'abc', :format => 'markdown'
     assert last_response.ok?
   end
@@ -619,6 +617,7 @@ context "Frontend with lotr" do
     assert !body.include?("Boromir"), "/pages should NOT include the page 'Boromir'"
     assert body.include?("Mordor"), "/pages should include the folder 'Mordor'"
     assert !body.include?("Eye Of Sauron"), "/pages should NOT include the page 'Eye Of Sauron'"
+    assert !body.match(/(Zamin).+(roast\-mutton)/m), "/pages should be sorted alphabetically"
   end
 
   test "/pages/Mordor/" do

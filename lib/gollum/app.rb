@@ -13,8 +13,6 @@ require 'gollum/views/has_page'
 
 require File.expand_path '../helpers', __FILE__
 
-require 'gollum/editing_auth'
-
 #required to upload bigger binary files
 Gollum::set_git_timeout(120)
 Gollum::set_git_max_filesize(190 * 10**6)
@@ -28,7 +26,7 @@ class String
       self # Do not transliterate utf-8 url's unless using Grit
     end
   end
-  
+
   # _Header => header which causes errors
   def to_url
     return nil if self.nil?
@@ -51,8 +49,7 @@ module Precious
   class App < Sinatra::Base
     register Mustache::Sinatra
     include Precious::Helpers
-    use Precious::EditingAuth
-
+    
     dir     = File.dirname(File.expand_path(__FILE__))
 
     # Detect unsupported browsers.
@@ -101,13 +98,16 @@ module Precious
     end
 
     before do
+      settings.wiki_options[:allow_editing] = settings.wiki_options.fetch(:allow_editing, true)
+      @allow_editing = settings.wiki_options[:allow_editing]
+      forbid unless @allow_editing || request.request_method == "GET"
+      Precious::App.set(:mustache, {:templates => settings.wiki_options[:template_dir]}) if settings.wiki_options[:template_dir]
       @base_url = url('/', false).chomp('/')
       # above will detect base_path when it's used with map in a config.ru
       settings.wiki_options.merge!({ :base_path => @base_url })
       @css = settings.wiki_options[:css]
       @js  = settings.wiki_options[:js]
       @mathjax_config = settings.wiki_options[:mathjax_config]
-      @allow_editing = settings.wiki_options.fetch(:allow_editing, true)
     end
 
     get '/' do
@@ -152,7 +152,7 @@ module Precious
       @allow_uploads = wiki.allow_uploads
       if page = wikip.page
         if wiki.live_preview && page.format.to_s.include?('markdown') && supported_useragent?(request.user_agent)
-          live_preview_url = '/livepreview/index.html?page=' + encodeURIComponent(@name)
+          live_preview_url = '/livepreview/?page=' + encodeURIComponent(@name)
           if @path
             live_preview_url << '&path=' + encodeURIComponent(@path)
           end
@@ -182,7 +182,8 @@ module Precious
         tempfile = params[:file][:tempfile]
       end
 
-      dir      = wiki.per_page_uploads ? params[:upload_dest] : 'uploads'
+      # Remove page file dir prefix from upload path if necessary -- committer handles this itself
+      dir      = wiki.per_page_uploads ? params[:upload_dest].match(/^(#{wiki.page_file_dir}\/+)?(.*)/)[2] : 'uploads'
       ext      = ::File.extname(fullname)
       format   = ext.split('.').last || 'txt'
       filename = ::File.basename(fullname, ext)
@@ -365,6 +366,12 @@ module Precious
       mustache :page
     end
 
+    get '/livepreview/' do
+      wiki = wiki_new
+      @mathjax = wiki.mathjax
+      mustache :livepreview, { :layout => false }
+    end
+
     get '/history/*' do
       @page     = wiki_page(params[:splat].first).page
       @page_num = [params[:page].to_i, 1].max
@@ -382,7 +389,7 @@ module Precious
       @versions = @wiki.latest_changes({:max_count => max_count})
       mustache :latest_changes
     end
-    
+
     post '/compare/*' do
       @file     = encodeURIComponent(params[:splat].first)
       @versions = params[:versions] || []
@@ -455,6 +462,7 @@ module Precious
       wiki         = Gollum::Wiki.new(settings.gollum_path, wiki_options)
       @results     = wiki.pages
       @results     += wiki.files if settings.wiki_options[:show_all]
+      @results     = @results.sort_by { |p| p.name.downcase } # Sort Results alphabetically, fixes 922
       @ref         = wiki.ref
       mustache :pages
     end
